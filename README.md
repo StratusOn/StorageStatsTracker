@@ -8,4 +8,4 @@ A simple solution that allows tracking new storage account creation as well as c
 * Upon the creation or deletion of a blob in the newly created storage account, a second Azure Function is triggered. The triggered function writes a record to the SQL database.
 
 ## The Storage Stats
-* The stats can be read from the database stats table by running SQL queries against it.
+* The stats can be read from the stats database table by running SQL queries against it.
