@@ -1,0 +1,391 @@
+{
+  "$schema": "http://schema.management.azure.com/schemas/2014-04-01-preview/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "The location of the resources (Azure region). Defaults to the current deployment's target location."
+      }
+    },
+    "storageAccountsResourceGroupName": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().name]",
+      "metadata": {
+        "description": "The name of the resource group where new Storage Accounts whose usage is to be tracked will be created. Defaults to the current deployment's resource group."
+      }
+    },
+    "storageAccountsSubscriptionId": {
+      "type": "string",
+      "defaultValue": "[subscription().subscriptionId]",
+      "metadata": {
+        "description": "The subscription Id of the subscription that contains the resource group where new Storage Accounts whose usage is to be tracked will be created. Defaults to the current deployment's subscription Id."
+      }
+    },
+    "consumptionSqlDbConnectionString": {
+      "type": "string",
+      "defaultValue": "Server=tcp:{sql_server_name}.database.windows.net,1433;Initial Catalog={sql_database_name};Persist Security Info=False;User ID={your_username};Password={your_password};MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;",
+      "metadata": {
+        "description": "The connection string to an existing Azure SQL Database or any other SQL Server database. It can be updated after deployment in the blobStorageEventFunction function (in the BlobStorageEventFunctionApp-* function app)."
+      }
+    },
+    "artifactsBaseUrl": {
+      "type": "string",
+      "metadata": {
+        "artifactsBaseUrl": "The base URL of the ARM Template's resources (child templates and supporting VM extension scripts). For Azure Marketplace gallery packages, this value is passed by the Azure portal."
+      },
+      "defaultValue": "https://blobation.blob.core.windows.net/templates"
+    },
+    "artifactsBaseUrlSasToken": {
+      "type": "securestring",
+      "metadata": {
+        "description": "The SAS token (including the leading '?') if artifactsBaseUrl represents an Azure Storage account. The SAS token should be setup to have at least read on the blob or read+list on the container."
+      },
+      "defaultValue": "?st=2018-02-22T22%3A08%3A00Z&se=2018-03-24T21%3A08%3A00Z&sp=rl&sv=2017-04-17&sr=c&sig=ufAoRjst55UiM11QIFz0hTpZenvSEDaxfZSXewipiFA%3D"
+    }
+  },
+  "variables": {
+    "uniqueSuffix": "[uniqueString(resourceGroup().id, guid(resourceGroup().id, deployment().name))]",
+    "functionsStorageAccountName": "[concat('funcstorage', variables('uniqueSuffix'))]",
+    "eventsStorageAccountName": "[concat('evntstorage', variables('uniqueSuffix'))]",
+    "eventGridResourceGroupEventsSubscriptionName": "[concat('ResourceGroupEventSubscription-', variables('uniqueSuffix'))]",
+    "hostingPlanName": "[concat('FunctionHostingPlan-', variables('uniqueSuffix'))]",
+    "createEventSubscriptionUrl": "[concat(parameters('artifactsBaseUrl'), '/createEventSubscription.json', parameters('artifactsBaseUrlSasToken'))]",
+    "applyRbacUrl": "[concat(parameters('artifactsBaseUrl'), '/applyRBAC.json', parameters('artifactsBaseUrlSasToken'))]",
+    "roleAssignmentId": "[guid(resourceGroup().id, deployment().name)]",
+    "roleAssignmentsApiVersion": "2016-07-01",
+    "msiApiVersion": "2015-08-31-PREVIEW",
+    "eventGridApiVersion": "2018-01-01",
+    "storageApiVersion": "2016-12-01",
+    "appServiceApiVersion": "2016-08-01",
+    "hostingPlanApiVersion": "2016-09-01",
+    "deploymentsApiVersion": "2017-05-10",
+    "createGetTokenFunctionAppUrl": "https://raw.githubusercontent.com/StratusOn/MSI-GetToken-FunctionApp/master/azuredeploy.json",
+    "blobStorageEventFunction": {
+      "functionAppName": "[concat('BlobStorageEventFunctionApp-', variables('uniqueSuffix'))]",
+      "functionName": "blobStorageEventFunction",
+      "functionFiles": {
+        "run.csx": "#r \"System.Web\"\r\n#r \"System.Configuration\"\r\n#r \"System.Data\"\r\n\r\nusing System;\r\nusing System.Collections.Generic;\r\nusing System.Configuration;\r\nusing System.Data;\r\nusing System.Data.SqlClient;\r\nusing System.IO;\r\nusing System.Linq;\r\nusing System.Net;\r\nusing System.Net.Http;\r\nusing System.Net.Http.Headers;\r\nusing System.Text;\r\nusing System.Threading.Tasks;\r\nusing Newtonsoft.Json; \r\nusing Newtonsoft.Json.Linq; \r\nusing Newtonsoft.Json.Serialization; \r\nusing Microsoft.Azure.EventGrid.Models; \r\n\r\npublic class SubscriptionValidationEventData \r\n{ \r\n    public string ValidationCode { get; set; } \r\n} \r\n\r\npublic class SubscriptionValidationResponseData \r\n{ \r\n    public string ValidationResponse { get; set; } \r\n} \r\n\r\npublic class BlobStorageCreatedEventData\r\n{\r\n    public string api { get; set; }\r\n    public string clientRequestId { get; set; }\r\n    public string requestId { get; set; }\r\n    public string eTag { get; set; }\r\n    public string contentType { get; set; }\r\n    public int contentLength { get; set; }\r\n    public string blobType { get; set; }\r\n    public string url { get; set; }\r\n    public string sequencer { get; set; }\r\n    public StorageDiagnostics storageDiagnostics { get; set; }\r\n}\r\n\r\npublic class BlobStorageDeletedEventData\r\n{\r\n    public string api { get; set; }\r\n    public string requestId { get; set; }\r\n    public string contentType { get; set; }\r\n    public string blobType { get; set; }\r\n    public string url { get; set; }\r\n    public string sequencer { get; set; }\r\n    public StorageDiagnostics storageDiagnostics { get; set; }\r\n}\r\n\r\npublic class StorageDiagnostics\r\n{\r\n    public string batchId { get; set; }\r\n}\r\n\r\npublic class ResourceEventData \r\n{ \r\n    public string correlationId { get; set; }     \r\n    public string httpRequest { get; set; }   \r\n    public string resourceProvider { get; set; }\r\n    public string resourceUri { get; set; }\r\n    public string operationName { get; set; }\r\n    public string status { get; set; }\r\n    public string subscriptionId { get; set; }\r\n    public string tenantId { get; set; }\r\n} \r\n\r\npublic static async Task<HttpResponseMessage> Run(HttpRequestMessage req, TraceWriter log) \r\n{ \r\n    log.Info($\"C# HTTP trigger function - Blob created/deleted\");\r\n\r\n    // Based on: https://docs.microsoft.com/en-us/azure/event-grid/receive-events\r\n    string response = string.Empty; \r\n    const string SubscriptionValidationEvent = \"Microsoft.EventGrid.SubscriptionValidationEvent\";\r\n    const string BlobCreatedEventType = \"Microsoft.Storage.BlobCreated\";\r\n    const string BlobDeletedEventType = \"Microsoft.Storage.BlobDeleted\";\r\n    const string StorageAccountDeletedEventType = \"Microsoft.Resources.ResourceDeleteSuccess\";\r\n\r\n    string requestContent = await req.Content.ReadAsStringAsync(); \r\n    EventGridEvent[] eventGridEvents = JsonConvert.DeserializeObject<EventGridEvent[]>(requestContent); \r\n\r\n    foreach (EventGridEvent eventGridEvent in eventGridEvents) \r\n    { \r\n        JObject dataObject = eventGridEvent.Data as JObject; \r\n\r\n        // Deserialize the event data into the appropriate type based on event type \r\n        if (string.Equals(eventGridEvent.EventType, SubscriptionValidationEvent, StringComparison.OrdinalIgnoreCase)) \r\n        { \r\n            var eventData = dataObject.ToObject<SubscriptionValidationEventData>(); \r\n            log.Info($\"Got SubscriptionValidation event data, validation code: {eventData.ValidationCode}, topic: {eventGridEvent.Topic}\"); \r\n            // Do any additional validation (as required) and then return back the below response \r\n            var responseData = new SubscriptionValidationResponseData(); \r\n            responseData.ValidationResponse = eventData.ValidationCode; \r\n            return req.CreateResponse(HttpStatusCode.OK, responseData);    \r\n        }\r\n        else\r\n        {\r\n            log.Info($\"EventType: {eventGridEvent.EventType}\"); \r\n            log.Info($\"Subject: {eventGridEvent.Subject}\");\r\n            log.Info($\"Topic: {eventGridEvent.Topic}\");  \r\n            log.Info($\"EventTime: {eventGridEvent.EventTime}\");  \r\n            log.Info($\"Id: {eventGridEvent.Id}\");\r\n            log.Info($\"DataVersion: {eventGridEvent.DataVersion}\");\r\n            log.Info($\"MetadataVersion: {eventGridEvent.MetadataVersion}\");\r\n\r\n            if (string.Equals(eventGridEvent.EventType, BlobCreatedEventType, StringComparison.OrdinalIgnoreCase))\r\n            {\r\n                var eventData = dataObject.ToObject<BlobStorageCreatedEventData>();\r\n\r\n                log.Info($\"Data.api: {eventData.api}\");\r\n                log.Info($\"Data.clientRequestId: {eventData.clientRequestId}\");  \r\n                log.Info($\"Data.requestId: {eventData.requestId}\");  \r\n                log.Info($\"Data.eTag: {eventData.eTag}\");  \r\n                log.Info($\"Data.contentType: {eventData.contentType}\");  \r\n                log.Info($\"Data.contentLength: {eventData.contentLength}\");  \r\n                log.Info($\"Data.blobType: {eventData.blobType}\");\r\n                log.Info($\"Data.url: {eventData.url}\");  \r\n                log.Info($\"Data.sequencer: {eventData.sequencer}\");  \r\n                log.Info($\"Data.storageDiagnostics.batchId: {eventData.storageDiagnostics.batchId}\"); \r\n\r\n                await WriteBlobCreatedEventToSqlDatabase(eventGridEvent, eventData, log); \r\n            }\r\n            else if (string.Equals(eventGridEvent.EventType, BlobDeletedEventType, StringComparison.OrdinalIgnoreCase))\r\n            {\r\n                var eventData = dataObject.ToObject<BlobStorageDeletedEventData>();\r\n\r\n                log.Info($\"Data.api: {eventData.api}\");\r\n                log.Info($\"Data.requestId: {eventData.requestId}\");  \r\n                log.Info($\"Data.contentType: {eventData.contentType}\");  \r\n                log.Info($\"Data.blobType: {eventData.blobType}\");  \r\n                log.Info($\"Data.url: {eventData.url}\");  \r\n                log.Info($\"Data.sequencer: {eventData.sequencer}\");  \r\n                log.Info($\"Data.storageDiagnostics.batchId: {eventData.storageDiagnostics.batchId}\");  \r\n\r\n                await WriteBlobDeletedEventToSqlDatabase(eventGridEvent, eventData, log); \r\n            }\r\n            else if (string.Equals(eventGridEvent.EventType, StorageAccountDeletedEventType, StringComparison.OrdinalIgnoreCase))\r\n            {\r\n                var eventData = dataObject.ToObject<ResourceEventData>();\r\n\r\n                log.Info($\"Data.correlationId: {eventData.correlationId}\");\r\n                log.Info($\"Data.httpRequest: {eventData.httpRequest}\");  \r\n                log.Info($\"Data.resourceProvider: {eventData.resourceProvider}\");  \r\n                log.Info($\"Data.resourceUri: {eventData.resourceUri}\");  \r\n                log.Info($\"Data.operationName: {eventData.operationName}\");  \r\n                log.Info($\"Data.status: {eventData.status}\");  \r\n                log.Info($\"Data.subscriptionId: {eventData.subscriptionId}\");  \r\n                log.Info($\"Data.tenantId: {eventData.tenantId}\");\r\n\r\n                await WriteStorageAccountDeletedEventToSqlDatabase(eventGridEvent, log); \r\n            }\r\n        }\r\n    } \r\n\r\n    return req.CreateResponse(HttpStatusCode.OK, response);     \r\n}\r\n\r\npublic static async Task WriteBlobCreatedEventToSqlDatabase(EventGridEvent eventGridEvent, BlobStorageCreatedEventData eventData, TraceWriter log)\r\n{\r\n    SqlCommand sqlCommand = new SqlCommand(\"[dbo].[InsertBlobStorageEventDataItem]\");\r\n    sqlCommand.CommandType = CommandType.StoredProcedure;\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@topic\", eventGridEvent.Topic));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@subject\", eventGridEvent.Subject));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@eventType\", eventGridEvent.EventType));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@eventTime\", eventGridEvent.EventTime));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@id\", eventGridEvent.Id));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@dataVersion\", eventGridEvent.DataVersion));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@metadataVersion\", eventGridEvent.MetadataVersion));\r\n\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@data_api\", eventData.api));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@data_clientRequestId\", eventData.clientRequestId));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@data_requestId\", eventData.requestId));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@data_eTag\", eventData.eTag));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@data_contentType\", eventData.contentType));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@data_contentLength\", eventData.contentLength));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@data_blobType\", eventData.blobType));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@data_url\", eventData.url));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@data_sequencer\", eventData.sequencer));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@data_storageDiagnostics_batchId\", eventData.storageDiagnostics.batchId));\r\n\r\n    await RunSqlCommand(sqlCommand, log);\r\n}\r\n\r\npublic static async Task WriteBlobDeletedEventToSqlDatabase(EventGridEvent eventGridEvent, BlobStorageDeletedEventData eventData, TraceWriter log)\r\n{\r\n    SqlCommand sqlCommand = new SqlCommand(\"[dbo].[InsertBlobStorageEventDataItem]\");\r\n    sqlCommand.CommandType = CommandType.StoredProcedure;\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@topic\", eventGridEvent.Topic));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@subject\", eventGridEvent.Subject));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@eventType\", eventGridEvent.EventType));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@eventTime\", eventGridEvent.EventTime));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@id\", eventGridEvent.Id));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@dataVersion\", eventGridEvent.DataVersion));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@metadataVersion\", eventGridEvent.MetadataVersion));\r\n\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@data_api\", eventData.api));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@data_requestId\", eventData.requestId));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@data_contentType\", eventData.contentType));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@data_blobType\", eventData.blobType));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@data_url\", eventData.url));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@data_sequencer\", eventData.sequencer));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@data_storageDiagnostics_batchId\", eventData.storageDiagnostics.batchId));\r\n\r\n    await RunSqlCommand(sqlCommand, log);\r\n}\r\n\r\npublic static async Task WriteStorageAccountDeletedEventToSqlDatabase(EventGridEvent eventGridEvent, TraceWriter log)\r\n{\r\n    SqlCommand sqlCommand = new SqlCommand(\"[dbo].[InsertBlobStorageEventDataItem]\");\r\n    sqlCommand.CommandType = CommandType.StoredProcedure;\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@topic\", eventGridEvent.Topic));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@subject\", eventGridEvent.Subject));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@eventType\", eventGridEvent.EventType));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@eventTime\", eventGridEvent.EventTime));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@id\", eventGridEvent.Id));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@dataVersion\", eventGridEvent.DataVersion));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@metadataVersion\", eventGridEvent.MetadataVersion));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@data_api\", string.Empty));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@data_requestId\", Guid.Empty));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@data_contentType\", string.Empty));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@data_blobType\", string.Empty));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@data_url\", string.Empty));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@data_sequencer\", string.Empty));\r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@data_storageDiagnostics_batchId\", Guid.Empty));\r\n \r\n    var data = JsonConvert.SerializeObject(eventGridEvent.Data); \r\n    sqlCommand.Parameters.Add(new SqlParameter(\"@storageAccountDeletedData\", data));\r\n\r\n    await RunSqlCommand(sqlCommand, log);\r\n}\r\n\r\npublic static async Task RunSqlCommand(SqlCommand sqlCommand, TraceWriter log)\r\n{\r\n    var connectionString = ConfigurationManager.ConnectionStrings[\"CONSUMPTION_SQLDB_CONNECTIONSTRING\"].ConnectionString;\r\n    using (SqlConnection connection = new SqlConnection(connectionString))\r\n    {\r\n        connection.Open();\r\n        sqlCommand.Connection = connection;\r\n        using (SqlCommand command = sqlCommand)\r\n        {\r\n            await command.ExecuteNonQueryAsync();\r\n            log.Info($\"Successfully executed stored proc.\");\r\n        }\r\n    }\r\n}\r\n",
+        "project.json": "{\r\n  \"frameworks\":\r\n  {\r\n    \"net46\":\r\n    {\r\n      \"dependencies\":\r\n      {\r\n        \"Microsoft.Azure.EventGrid\": \"1.1.0-preview\"\r\n      }\r\n    }\r\n  }\r\n}"
+      }
+    },
+    "resourceGroupEventFunction": {
+      "functionAppName": "[concat('ResourceGroupEventFunctionApp-', variables('uniqueSuffix'))]",
+      "functionName": "resourceGroupEventFunction",
+      "functionFiles": {
+        "run.csx": "#r \"System.Web\"\r\n\r\nusing System;\r\nusing System.Collections.Generic;\r\nusing System.Configuration;\r\nusing System.IO;\r\nusing System.Linq;\r\nusing System.Net;\r\nusing System.Net.Http;\r\nusing System.Net.Http.Headers;\r\nusing System.Text;\r\nusing System.Text.RegularExpressions;\r\nusing System.Threading.Tasks;\r\nusing Newtonsoft.Json; \r\nusing Newtonsoft.Json.Linq; \r\nusing Newtonsoft.Json.Serialization; \r\nusing Microsoft.Azure.EventGrid.Models; \r\n\r\npublic class SubscriptionValidationEventData \r\n{ \r\n    public string ValidationCode { get; set; }\r\n} \r\n\r\npublic class SubscriptionValidationResponseData \r\n{ \r\n    public string ValidationResponse { get; set; } \r\n} \r\n\r\npublic class ResourceEventData \r\n{ \r\n    public string correlationId { get; set; }     \r\n    public string httpRequest { get; set; }   \r\n    public string resourceProvider { get; set; }\r\n    public string resourceUri { get; set; }\r\n    public string operationName { get; set; }\r\n    public string status { get; set; }\r\n    public string subscriptionId { get; set; }\r\n    public string tenantId { get; set; }\r\n} \r\n\r\npublic static async Task<HttpResponseMessage> Run(HttpRequestMessage req, TraceWriter log) \r\n{ \r\n    log.Info($\"C# HTTP trigger function - Storage Account created/deleted\");\r\n\r\n    // Based on: https://docs.microsoft.com/en-us/azure/event-grid/receive-events\r\n    string response = string.Empty; \r\n    const string SubscriptionValidationEvent = \"Microsoft.EventGrid.SubscriptionValidationEvent\";\r\n    const string StorageResourceProvider = \"Microsoft.Storage\";\r\n    const string ResourceCreatedEvent = \"Microsoft.Resources.ResourceWriteSuccess\";\r\n    const string ResourceDeletedEvent = \"Microsoft.Resources.ResourceDeleteSuccess\";\r\n\r\n    string requestContent = await req.Content.ReadAsStringAsync(); \r\n    EventGridEvent[] eventGridEvents = JsonConvert.DeserializeObject<EventGridEvent[]>(requestContent); \r\n\r\n    foreach (EventGridEvent eventGridEvent in eventGridEvents) \r\n    { \r\n        JObject dataObject = eventGridEvent.Data as JObject; \r\n\r\n        // Deserialize the event data into the appropriate type based on event type \r\n        if (string.Equals(eventGridEvent.EventType, SubscriptionValidationEvent, StringComparison.OrdinalIgnoreCase)) \r\n        { \r\n            var eventData = dataObject.ToObject<SubscriptionValidationEventData>(); \r\n            log.Info($\"Got SubscriptionValidation event data, validation code: {eventData.ValidationCode}, topic: {eventGridEvent.Topic}\"); \r\n            // Do any additional validation (as required) and then return back the below response \r\n            var responseData = new SubscriptionValidationResponseData(); \r\n            responseData.ValidationResponse = eventData.ValidationCode; \r\n            return req.CreateResponse(HttpStatusCode.OK, responseData);    \r\n        }\r\n        else\r\n        {\r\n            log.Info($\"EventType: {eventGridEvent.EventType}\"); \r\n            log.Info($\"Subject: {eventGridEvent.Subject}\");\r\n            log.Info($\"Topic: {eventGridEvent.Topic}\");  \r\n            log.Info($\"EventTime: {eventGridEvent.EventTime}\");  \r\n            log.Info($\"Id: {eventGridEvent.Id}\");  \r\n\r\n            var eventData = dataObject.ToObject<ResourceEventData>();\r\n\r\n            // Only process events where resourceProvider=Microsoft.Storage.\r\n            if (string.Equals(eventData.resourceProvider, StorageResourceProvider, StringComparison.OrdinalIgnoreCase))\r\n            {\r\n                log.Info($\"Data.correlationId: {eventData.correlationId}\");\r\n                log.Info($\"Data.httpRequest: {eventData.httpRequest}\");  \r\n                log.Info($\"Data.resourceProvider: {eventData.resourceProvider}\");  \r\n                log.Info($\"Data.resourceUri: {eventData.resourceUri}\");  \r\n                log.Info($\"Data.operationName: {eventData.operationName}\");  \r\n                log.Info($\"Data.status: {eventData.status}\");  \r\n                log.Info($\"Data.subscriptionId: {eventData.subscriptionId}\");  \r\n                log.Info($\"Data.tenantId: {eventData.tenantId}\");  \r\n\r\n                string webHookUri = ConfigurationManager.AppSettings[\"BLOB_STORAGE_EVENTS_FUNCTIONAPPNAME_ENDPOINT\"];\r\n                if (string.IsNullOrWhiteSpace(webHookUri))\r\n                {\r\n                    return new HttpResponseMessage(HttpStatusCode.BadRequest)\r\n                    {\r\n                        Content = new StringContent(\"The BLOB_STORAGE_EVENTS_FUNCTIONAPPNAME_ENDPOINT application setting is missing.\", Encoding.UTF8, \"application/json\")\r\n                    };\r\n                }\r\n                log.Info($\"webHookUri: {webHookUri}\");\r\n\r\n                // Create a subscription if a storage account is created.\r\n                if (string.Equals(eventGridEvent.EventType, ResourceCreatedEvent, StringComparison.OrdinalIgnoreCase))\r\n                {\r\n                    return await CreateStorageAccountSubscription(eventData, webHookUri, log);\r\n                }\r\n                else if (string.Equals(eventGridEvent.EventType, ResourceDeletedEvent, StringComparison.OrdinalIgnoreCase))\r\n                {\r\n                    return await TriggerStorageAccountDeletedEvent(requestContent, webHookUri, log);\r\n                }\r\n            }\r\n        }\r\n    } \r\n\r\n    return req.CreateResponse(HttpStatusCode.OK, response);     \r\n}\r\n\r\npublic static async Task<HttpResponseMessage> CreateStorageAccountSubscription(ResourceEventData eventData, string webHookUri, TraceWriter log) \r\n{\r\n    const string requestBody = \"{\\r\\n  \\\"properties\\\": {\\r\\n    \\\"destination\\\": {\\r\\n      \\\"endpointType\\\": \\\"WebHook\\\",\\r\\n      \\\"properties\\\": {\\r\\n        \\\"endpointUrl\\\": \\\"~~webHookUri~~\\\"\\r\\n      }\\r\\n    },\\r\\n    \\\"filter\\\": {\\r\\n      \\\"isSubjectCaseSensitive\\\": false,\\r\\n      \\\"subjectBeginsWith\\\": \\\"\\\",\\r\\n      \\\"subjectEndsWith\\\": \\\"\\\"\\r\\n    }\\r\\n  }\\r\\n}\";\r\n    string scope = eventData.resourceUri;\r\n\r\n    // Parse the storage account name:\r\n    Regex regex = new Regex(@\"/subscriptions/(?<SubscriptionId>.+)/resourcegroups/(?<ResourceGroup>.+)/providers/Microsoft.Storage/storageAccounts/(?<StorageAccount>[a-z0-9]{1,24})\", \r\n\t\tRegexOptions.Singleline);\r\n    Match match = regex.Match(eventData.resourceUri);\r\n\r\n    var storageAccountName = match.Groups[\"StorageAccount\"].Value;\r\n    var eventSubscriptionName = $\"{storageAccountName}-eventsubscription\";\r\n    \r\n    // Get a fresh token.\r\n    string msiGetTokenEndpoint = ConfigurationManager.AppSettings[\"MSI_GETTOKEN_ENDPOINT\"];\r\n    if (string.IsNullOrWhiteSpace(msiGetTokenEndpoint))\r\n    {\r\n        return new HttpResponseMessage(HttpStatusCode.BadRequest)\r\n        {\r\n            Content = new StringContent(\"The MSI_GETTOKEN_ENDPOINT application setting is missing.\", Encoding.UTF8, \"application/json\")\r\n        };\r\n    }\r\n    log.Info($\"MSI GetToken Endpoint: {msiGetTokenEndpoint}\");\r\n    string accessToken = await InvokeRestMethodAsync(msiGetTokenEndpoint, log, HttpMethod.Get);\r\n    //log.Info($\"MSI Token: {accessToken}\");\r\n\r\n    string createEventSubscription = $\"https://management.azure.com{scope}/providers/Microsoft.EventGrid/eventSubscriptions/{eventSubscriptionName}?api-version=2018-01-01\";\r\n    \r\n    log.Info($\"createEventSubscription: {createEventSubscription}\");\r\n    string content = requestBody.Replace(\"~~webHookUri~~\", webHookUri);\r\n    //log.Info($\"content: {content}\");\r\n\r\n    var eventSubscriptionResponse = await InvokeRestMethodAsync(createEventSubscription, log, HttpMethod.Put, content, accessToken);\r\n    log.Info($\"eventSubscriptionResponse: {eventSubscriptionResponse}\");\r\n\r\n    return new HttpResponseMessage(HttpStatusCode.OK)\r\n    {\r\n        Content = new StringContent(eventSubscriptionResponse, Encoding.UTF8, \"application/json\")\r\n    };\r\n}\r\n\r\npublic static async Task<HttpResponseMessage> TriggerStorageAccountDeletedEvent(string requestContent, string webHookUri, TraceWriter log) \r\n{\r\n    log.Info($\"Triggering StorageAccountDeleted event.\");\r\n\r\n    var triggerEventResponse = await InvokeRestMethodAsync(webHookUri, log, HttpMethod.Post, requestContent);\r\n    log.Info($\"triggerEventResponse: {triggerEventResponse}\");\r\n\r\n    return new HttpResponseMessage(HttpStatusCode.OK)\r\n    {\r\n        Content = new StringContent(triggerEventResponse, Encoding.UTF8, \"application/json\")\r\n    };\r\n}\r\n\r\npublic static async Task<string> InvokeRestMethodAsync(string url, TraceWriter log, HttpMethod httpMethod, string body = null, string authorizationToken = null, string authorizationScheme = \"Bearer\", IDictionary<string, string> headers = null, string additionalContentTypeHeaders = \"\")\r\n{\r\n    HttpClient client = new HttpClient();\r\n    if (!string.IsNullOrWhiteSpace(authorizationToken))\r\n    {\r\n        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(authorizationScheme, authorizationToken);\r\n        //log.Info($\"Authorization: {client.DefaultRequestHeaders.Authorization.Parameter}\");\r\n    }\r\n\r\n    HttpRequestMessage request = new HttpRequestMessage(httpMethod, url);\r\n    if (headers != null && headers.Count > 0)\r\n    {\r\n        foreach (var header in headers)\r\n        {\r\n            request.Headers.Add(header.Key, header.Value);\r\n        }\r\n    }\r\n\r\n    if (!string.IsNullOrWhiteSpace(body))\r\n    {\r\n        request.Content = new StringContent(body, Encoding.UTF8);\r\n        if (!string.IsNullOrWhiteSpace(additionalContentTypeHeaders))\r\n        {\r\n            request.Content.Headers.ContentType = MediaTypeHeaderValue.Parse($\"application/json{additionalContentTypeHeaders}\");\r\n        }\r\n        else\r\n        {\r\n            request.Content.Headers.ContentType = MediaTypeHeaderValue.Parse(\"application/json\");\r\n        }\r\n    }\r\n\r\n    HttpResponseMessage response = await client.SendAsync(request);\r\n    if (response.IsSuccessStatusCode)\r\n    {\r\n        return await response.Content.ReadAsStringAsync();\r\n    }\r\n\r\n    string statusCodeName = response.StatusCode.ToString();\r\n    int statusCodeValue = (int)response.StatusCode;\r\n    string content = await response.Content.ReadAsStringAsync();\r\n    log.Info($\"Status Code: {statusCodeName} ({statusCodeValue}). Body: {content}\");\r\n\r\n    throw new Exception($\"Status Code: {statusCodeName} ({statusCodeValue}). Body: {content}\");\r\n}\r\n",
+        "project.json": "{\r\n  \"frameworks\":\r\n  {\r\n    \"net46\":\r\n    {\r\n      \"dependencies\":\r\n      {\r\n        \"Microsoft.Azure.EventGrid\": \"1.1.0-preview\"\r\n      }\r\n    }\r\n  }\r\n}"
+      }
+    }
+  },
+  "resources": [
+    {
+      "apiVersion": "[variables('storageApiVersion')]",
+      "type": "Microsoft.Storage/storageAccounts",
+      "name": "[variables('functionsStorageAccountName')]",
+      "location": "[parameters('location')]",
+      "kind": "Storage",
+      "sku": {
+        "name": "Standard_LRS"
+      }
+    },
+    {
+      "apiVersion": "[variables('storageApiVersion')]",
+      "type": "Microsoft.Storage/storageAccounts",
+      "name": "[variables('eventsStorageAccountName')]",
+      "location": "[parameters('location')]",
+      "kind": "Storage",
+      "sku": {
+        "name": "Standard_LRS"
+      }
+    },
+    {
+      "name": "createGetTokenFunction",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "[variables('deploymentsApiVersion')]",
+      "properties": {
+        "mode": "Incremental",
+        "templateLink": {
+          "uri": "[variables('createGetTokenFunctionAppUrl')]",
+          "contentVersion": "1.0.0.0"
+        },
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Web/serverfarms",
+      "apiVersion": "[variables('hostingPlanApiVersion')]",
+      "name": "[variables('hostingPlanName')]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('functionsStorageAccountName'))]"
+      ],
+      "properties": {
+        "name": "[variables('hostingPlanName')]",
+        "computeMode": "Shared",
+        "kind": "functionapp"
+      },
+      "sku": {
+        "name": "Y1",
+        "tier": "Dynamic",
+        "size": "Y1",
+        "family": "Y",
+        "capacity": 0
+      }
+    },
+    {
+      "apiVersion": "[variables('appServiceApiVersion')]",
+      "name": "[variables('blobStorageEventFunction').functionAppName]",
+      "type": "Microsoft.Web/sites",
+      "location": "[parameters('location')]",
+      "kind": "functionapp",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/serverfarms', variables('hostingPlanName'))]",
+        "Microsoft.Resources/deployments/createGetTokenFunction"
+      ],
+      "properties": {
+        "name": "[variables('blobStorageEventFunction').functionAppName]",
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('hostingPlanName'))]",
+        "siteConfig": {
+          "appSettings": [
+            {
+              "name": "AzureWebJobsDashboard",
+              "value": "[concat('DefaultEndpointsProtocol=https;AccountName=',variables('functionsStorageAccountName'),';AccountKey=',listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('functionsStorageAccountName')), variables('storageApiVersion')).keys[0].value)]"
+            },
+            {
+              "name": "AzureWebJobsStorage",
+              "value": "[concat('DefaultEndpointsProtocol=https;AccountName=',variables('functionsStorageAccountName'),';AccountKey=',listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('functionsStorageAccountName')), variables('storageApiVersion')).keys[0].value)]"
+            },
+            {
+              "name": "FUNCTIONS_EXTENSION_VERSION",
+              "value": "~1"
+            },
+            {
+              "name": "WEBSITE_CONTENTAZUREFILECONNECTIONSTRING",
+              "value": "[concat('DefaultEndpointsProtocol=https;AccountName=',variables('functionsStorageAccountName'),';AccountKey=',listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('functionsStorageAccountName')), variables('storageApiVersion')).keys[0].value)]"
+            },
+            {
+              "name": "WEBSITE_CONTENTSHARE",
+              "value": "[concat(toLower(variables('blobStorageEventFunction').functionAppName), '3d6f6a616c6c')]"
+            },
+            {
+              "name": "WEBSITE_NODE_DEFAULT_VERSION",
+              "value": "6.5.0"
+            },
+            {
+              "name": "WEBSITE_USE_PLACEHOLDER",
+              "value": "0"
+            },
+            {
+              "name": "MSI_GETTOKEN_ENDPOINT",
+              "value": "[reference('Microsoft.Resources/deployments/createGetTokenFunction', variables('deploymentsApiVersion')).outputs.getDefaultTokenEndpoint.value]"
+            },
+            {
+              "name": "CONSUMPTION_STORAGEACCOUNT_CONNECTIONSTRING",
+              "value": "[concat('DefaultEndpointsProtocol=https;AccountName=',variables('eventsStorageAccountName'),';AccountKey=',listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('eventsStorageAccountName')), variables('storageApiVersion')).keys[0].value)]"
+            }
+          ],
+          "connectionStrings": [
+            {
+              "name": "CONSUMPTION_SQLDB_CONNECTIONSTRING",
+              "type": "SQLAzure",
+              "connectionString": "[parameters('consumptionSqlDbConnectionString')]"
+            }
+          ]
+        },
+        "clientAffinityEnabled": false
+      }
+    },
+    {
+      "apiVersion": "[variables('appServiceApiVersion')]",
+      "name": "[variables('resourceGroupEventFunction').functionAppName]",
+      "type": "Microsoft.Web/sites",
+      "location": "[parameters('location')]",
+      "kind": "functionapp",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/serverfarms', variables('hostingPlanName'))]",
+        "Microsoft.Resources/deployments/createGetTokenFunction",
+        "[resourceId('Microsoft.Web/sites/functions', variables('blobStorageEventFunction').functionAppName, variables('blobStorageEventFunction').functionName)]"
+      ],
+      "properties": {
+        "name": "[variables('resourceGroupEventFunction').functionAppName]",
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('hostingPlanName'))]",
+        "siteConfig": {
+          "appSettings": [
+            {
+              "name": "AzureWebJobsDashboard",
+              "value": "[concat('DefaultEndpointsProtocol=https;AccountName=',variables('functionsStorageAccountName'),';AccountKey=',listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('functionsStorageAccountName')), variables('storageApiVersion')).keys[0].value)]"
+            },
+            {
+              "name": "AzureWebJobsStorage",
+              "value": "[concat('DefaultEndpointsProtocol=https;AccountName=',variables('functionsStorageAccountName'),';AccountKey=',listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('functionsStorageAccountName')), variables('storageApiVersion')).keys[0].value)]"
+            },
+            {
+              "name": "FUNCTIONS_EXTENSION_VERSION",
+              "value": "~1"
+            },
+            {
+              "name": "WEBSITE_CONTENTAZUREFILECONNECTIONSTRING",
+              "value": "[concat('DefaultEndpointsProtocol=https;AccountName=',variables('functionsStorageAccountName'),';AccountKey=',listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('functionsStorageAccountName')), variables('storageApiVersion')).keys[0].value)]"
+            },
+            {
+              "name": "WEBSITE_CONTENTSHARE",
+              "value": "[concat(toLower(variables('resourceGroupEventFunction').functionAppName), '3d6f6a616c6c')]"
+            },
+            {
+              "name": "WEBSITE_NODE_DEFAULT_VERSION",
+              "value": "6.5.0"
+            },
+            {
+              "name": "WEBSITE_USE_PLACEHOLDER",
+              "value": "0"
+            },
+            {
+              "name": "MSI_GETTOKEN_ENDPOINT",
+              "value": "[reference('Microsoft.Resources/deployments/createGetTokenFunction', variables('deploymentsApiVersion')).outputs.getDefaultTokenEndpoint.value]"
+            },
+            {
+              "name": "CONSUMPTION_STORAGEACCOUNT_CONNECTIONSTRING",
+              "value": "[concat('DefaultEndpointsProtocol=https;AccountName=',variables('eventsStorageAccountName'),';AccountKey=',listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('eventsStorageAccountName')), variables('storageApiVersion')).keys[0].value)]"
+            },
+            {
+              "name": "BLOB_STORAGE_EVENTS_FUNCTIONAPPNAME_ENDPOINT",
+              "value": "[concat('https://', variables('blobStorageEventFunction').functionAppName, '.azurewebsites.net/api/', variables('blobStorageEventFunction').functionName, '?code=', listsecrets(resourceId('Microsoft.Web/sites/functions', variables('blobStorageEventFunction').functionAppName, variables('blobStorageEventFunction').functionName), variables('appServiceApiVersion')).key)]"
+            }
+          ]
+        },
+        "clientAffinityEnabled": false
+      }
+    },
+    {
+      "apiVersion": "[variables('appServiceApiVersion')]",
+      "name": "[concat(variables('blobStorageEventFunction').functionAppName, '/', variables('blobStorageEventFunction').functionName)]",
+      "type": "Microsoft.Web/sites/functions",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/Sites', variables('blobStorageEventFunction').functionAppName)]"
+      ],
+      "properties": {
+        "config": {
+          "bindings": [
+            {
+              "name": "req",
+              "authLevel": "function",
+              "direction": "in",
+              "type": "httpTrigger"
+            },
+            {
+              "name": "res",
+              "direction": "out",
+              "type": "http"
+            }
+          ],
+          "disabled": false
+        },
+        "files": "[variables('blobStorageEventFunction').functionFiles]"
+      }
+    },
+    {
+      "apiVersion": "[variables('appServiceApiVersion')]",
+      "name": "[concat(variables('resourceGroupEventFunction').functionAppName, '/', variables('resourceGroupEventFunction').functionName)]",
+      "type": "Microsoft.Web/sites/functions",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/Sites', variables('resourceGroupEventFunction').functionAppName)]"
+      ],
+      "properties": {
+        "config": {
+          "bindings": [
+            {
+              "name": "req",
+              "authLevel": "function",
+              "direction": "in",
+              "type": "httpTrigger"
+            },
+            {
+              "name": "res",
+              "direction": "out",
+              "type": "http"
+            }
+          ],
+          "disabled": false
+        },
+        "files": "[variables('resourceGroupEventFunction').functionFiles]"
+      }
+    },
+    {
+      "condition": "[or(not(equals(parameters('storageAccountsSubscriptionId'), subscription().subscriptionId)), not(equals(parameters('storageAccountsResourceGroupName'), resourceGroup().name)))]",
+      "name": "applyRbac",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "[variables('deploymentsApiVersion')]",
+      "resourceGroup": "[parameters('storageAccountsResourceGroupName')]",
+      "subscriptionId": "[parameters('storageAccountsSubscriptionId')]",
+      "dependsOn": [
+        "Microsoft.Resources/deployments/createGetTokenFunction"
+      ],
+      "properties": {
+        "mode": "Incremental",
+        "templateLink": {
+          "uri": "[variables('applyRbacUrl')]",
+          "contentVersion": "1.0.0.0"
+        },
+        "parameters": {
+          "roleAssignmentId": {
+            "value": "[variables('roleAssignmentId')]"
+          },
+          "roleAssignmentsApiVersion": {
+            "value": "[variables('roleAssignmentsApiVersion')]"
+          },
+          "functionAppIdentityResourceId": {
+            "value": "[reference('Microsoft.Resources/deployments/createGetTokenFunction', variables('deploymentsApiVersion')).outputs.functionAppIdentityResourceId.value]"
+          },
+          "msiApiVersion": {
+            "value": "[variables('msiApiVersion')]"
+          }
+        }
+      }
+    },
+    {
+      "name": "createEventSubscription",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "[variables('deploymentsApiVersion')]",
+      "resourceGroup": "[parameters('storageAccountsResourceGroupName')]",
+      "subscriptionId": "[parameters('storageAccountsSubscriptionId')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites/functions', variables('resourceGroupEventFunction').functionAppName, variables('resourceGroupEventFunction').functionName)]",
+        "Microsoft.Resources/deployments/applyRbac"
+      ],
+      "properties": {
+        "mode": "Incremental",
+        "templateLink": {
+          "uri": "[variables('createEventSubscriptionUrl')]",
+          "contentVersion": "1.0.0.0"
+        },
+        "parameters": {
+          "eventGridResourceGroupEventsSubscriptionName": {
+            "value": "[variables('eventGridResourceGroupEventsSubscriptionName')]"
+          },
+          "eventGridApiVersion": {
+            "value": "[variables('eventGridApiVersion')]"
+          },
+          "endpointUrl": {
+            "value": "[concat('https://', variables('resourceGroupEventFunction').functionAppName, '.azurewebsites.net/api/', variables('resourceGroupEventFunction').functionName, '?code=', listsecrets(resourceId('Microsoft.Web/sites/functions', variables('resourceGroupEventFunction').functionAppName, variables('resourceGroupEventFunction').functionName), variables('appServiceApiVersion')).key)]"
+          }
+        }
+      }
+    }
+  ],
+  "outputs": {
+    "blobStorageEventsFunctionAppNameEndpoint": {
+      "type": "string",
+      "value": "[concat('https://', variables('blobStorageEventFunction').functionAppName, '.azurewebsites.net/api/', variables('blobStorageEventFunction').functionName, '?code=', listsecrets(resourceId('Microsoft.Web/sites/functions', variables('blobStorageEventFunction').functionAppName, variables('blobStorageEventFunction').functionName), variables('appServiceApiVersion')).key)]"
+    },
+    "resourceGroupEventsFunctionAppNameEndpoint": {
+      "type": "string",
+      "value": "[concat('https://', variables('resourceGroupEventFunction').functionAppName, '.azurewebsites.net/api/', variables('resourceGroupEventFunction').functionName, '?code=', listsecrets(resourceId('Microsoft.Web/sites/functions', variables('resourceGroupEventFunction').functionAppName, variables('resourceGroupEventFunction').functionName), variables('appServiceApiVersion')).key)]"
+    }
+  }
+}

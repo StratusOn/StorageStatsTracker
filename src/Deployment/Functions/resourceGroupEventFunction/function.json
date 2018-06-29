@@ -1,0 +1,16 @@
+{
+  "bindings": [
+    {
+      "name": "req",
+      "authLevel": "function",
+      "direction": "in",
+      "type": "httpTrigger"
+    },
+    {
+      "name": "res",
+      "direction": "out",
+      "type": "http"
+    }
+  ],
+  "disabled": false
+}

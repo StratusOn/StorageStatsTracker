@@ -1,0 +1,43 @@
+﻿{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "eventGridResourceGroupEventsSubscriptionName": {
+      "type": "string"
+    },
+    "eventGridApiVersion": {
+      "type": "string"
+    },
+    "endpointUrl": {
+      "type": "string"
+    }
+  },
+  "variables": {
+  },
+  "resources": [
+    {
+      "type": "Microsoft.EventGrid/eventSubscriptions",
+      "name": "[parameters('eventGridResourceGroupEventsSubscriptionName')]",
+      "apiVersion": "[parameters('eventGridApiVersion')]",
+      "properties": {
+        "destination": {
+          "endpointType": "WebHook",
+          "properties": {
+            "endpointUrl": "[parameters('endpointUrl')]"
+          }
+        },
+        "filter": {
+          "subjectBeginsWith": "",
+          "subjectEndsWith": "",
+          "isSubjectCaseSensitive": false,
+          "includedEventTypes": [
+            "Microsoft.Resources.ResourceWriteSuccess",
+            "Microsoft.Resources.ResourceDeleteSuccess"
+          ]
+        }
+      }
+    }
+  ],
+  "outputs": {
+  }
+}

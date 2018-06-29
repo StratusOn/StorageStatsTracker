@@ -1,0 +1,21 @@
+[{
+  "topic":"/subscriptions/{subscription-id}/resourceGroups/{resource-group}",
+  "subject": "/subscriptions/{subscription-id}/resourceGroups/{resource-group}/providers/Microsoft.EventGrid/eventSubscriptions/LogicApp0ecd6c02-2296-4d7c-9865-01532dc99c93",
+  "eventType": "Microsoft.Resources.ResourceDeleteSuccess",
+  "eventTime": "2017-11-07T21:24:19.6959483Z",
+  "id": "7995ecce-39d4-4851-b9d7-a7ef87a06bf5",
+  "data": {
+    "authorization": "{azure_resource_manager_authorizations}",
+    "claims": "{azure_resource_manager_claims}",
+    "correlationId": "7995ecce-39d4-4851-b9d7-a7ef87a06bf5",
+    "httpRequest": "{request-operation}",
+    "resourceProvider": "Microsoft.EventGrid",
+    "resourceUri": "/subscriptions/{subscription-id}/resourceGroups/{resource-group}/providers/Microsoft.EventGrid/eventSubscriptions/LogicAppdd584bdf-8347-49c9-b9a9-d1f980783501",
+    "operationName": "Microsoft.EventGrid/eventSubscriptions/delete",
+    "status": "Succeeded",
+    "subscriptionId": "{subscription-id}",
+    "tenantId": "72f988bf-86f1-41af-91ab-2d7cd011db47"
+  },
+  "dataVersion": "",
+  "metadataVersion": "1"
+}]

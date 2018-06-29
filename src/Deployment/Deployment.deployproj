@@ -1,0 +1,50 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|AnyCPU">
+      <Configuration>Debug</Configuration>
+      <Platform>AnyCPU</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|AnyCPU">
+      <Configuration>Release</Configuration>
+      <Platform>AnyCPU</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>f8642f97-bfc1-4c0e-8e0a-2e0fb28c3fb6</ProjectGuid>
+  </PropertyGroup>
+  <PropertyGroup>
+    <TargetFrameworkIdentifier>Deployment</TargetFrameworkIdentifier>
+    <TargetFrameworkVersion>1.0</TargetFrameworkVersion>
+    <PrepareForBuildDependsOn>
+    </PrepareForBuildDependsOn>
+  </PropertyGroup>
+  <Import Condition=" Exists('Deployment.targets') " Project="Deployment.targets" />
+  <Import Project="$(MSBuildToolsPath)\Microsoft.Common.targets" />
+  <!-- vertag<:>start tokens<:>maj.min -->
+  <Import Condition=" Exists('$(MSBuildExtensionsPath)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Deployment\1.1\DeploymentProject.targets') " Project="$(MSBuildExtensionsPath)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Deployment\1.1\DeploymentProject.targets" />
+  <!-- vertag<:>end -->
+  <ItemGroup>
+    <Content Include="azuredeploy.json" />
+    <Content Include="azuredeploy.parameters.json" />
+    <None Include="applyRBAC.json" />
+    <None Include="Deployment.targets">
+      <Visible>False</Visible>
+    </None>
+    <Content Include="Deploy-AzureResourceGroup.ps1" />
+    <None Include="createEventSubscription.json" />
+    <None Include="Functions\blobStorageEventFunction\function.json" />
+    <None Include="Functions\blobStorageEventFunction\project.json" />
+    <None Include="Functions\blobStorageEventFunction\run.csx" />
+    <None Include="Functions\resourceGroupEventFunction\function.json" />
+    <None Include="Functions\resourceGroupEventFunction\project.json" />
+    <None Include="Functions\resourceGroupEventFunction\run.csx" />
+    <None Include="Samples\Sample-BlobCreatedEvent.json" />
+    <None Include="Samples\Sample-BlobDeletedEvent.json" />
+    <None Include="Samples\Sample-StorageAccountDeletedEvent.json" />
+    <None Include="Samples\SprocCall-Sample1.sql" />
+    <None Include="SQLScripts\dbo.BlobStorageEventData.sql" />
+    <None Include="SQLScripts\dbo.InsertBlobStorageEventDataItem.sql" />
+  </ItemGroup>
+  <Target Name="GetReferenceAssemblyPaths" />
+</Project>
