@@ -1,7 +1,3 @@
-USE [sqldb1]
-GO
-
-/****** Object: SqlProcedure [dbo].[InsertBlobStorageEventDataItem] Script Date: 3/1/2018 9:43:01 PM ******/
 SET ANSI_NULLS ON
 GO
 

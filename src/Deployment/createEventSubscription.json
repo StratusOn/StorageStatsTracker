@@ -19,6 +19,10 @@
       "type": "Microsoft.EventGrid/eventSubscriptions",
       "name": "[parameters('eventGridResourceGroupEventsSubscriptionName')]",
       "apiVersion": "[parameters('eventGridApiVersion')]",
+      "tags": {
+        "displayName": "EventGridResourceGroupEventSubscription",
+        "applicationName": "StorageStatsTracker"
+      },
       "properties": {
         "destination": {
           "endpointType": "WebHook",

@@ -1,7 +1,3 @@
-USE [sqldb1]
-GO
-
-/****** Object: Table [dbo].[BlobStorageEventData] Script Date: 3/1/2018 9:42:45 PM ******/
 SET ANSI_NULLS ON
 GO
 
@@ -28,7 +24,7 @@ CREATE TABLE [dbo].[BlobStorageEventData] (
     [dataVersion]                     NVARCHAR (50)    NOT NULL,
     [metadataVersion]                 NVARCHAR (50)    NULL,
     [storageAccountDeletedData]       NVARCHAR (MAX)  NULL,
-    [DateCreated]                     DATETIME         NOT NULL
+    [DateCreated]                     DATETIME         NOT NULL DEFAULT GETUTCDATE()
 );
 
 

@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.Configuration;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -50,8 +51,10 @@ public static async Task<HttpResponseMessage> Run(HttpRequestMessage req, TraceW
     const string ResourceDeletedEvent = "Microsoft.Resources.ResourceDeleteSuccess";
 
     string requestContent = await req.Content.ReadAsStringAsync(); 
-    EventGridEvent[] eventGridEvents = JsonConvert.DeserializeObject<EventGridEvent[]>(requestContent); 
+    EventGridEvent[] eventGridEvents = JsonConvert.DeserializeObject<EventGridEvent[]>(requestContent);
 
+    var responseContent = new StringBuilder();
+    var responseContentSeparator = "{{\r\n";
     foreach (EventGridEvent eventGridEvent in eventGridEvents) 
     { 
         JObject dataObject = eventGridEvent.Data as JObject; 
@@ -101,15 +104,33 @@ public static async Task<HttpResponseMessage> Run(HttpRequestMessage req, TraceW
                 // Create a subscription if a storage account is created.
                 if (string.Equals(eventGridEvent.EventType, ResourceCreatedEvent, StringComparison.OrdinalIgnoreCase))
                 {
-                    return await CreateStorageAccountSubscription(eventData, webHookUri, log);
+                    var responseMessage = await CreateStorageAccountSubscription(eventData, webHookUri, log);
+                    responseContent.AppendFormat(CultureInfo.InvariantCulture, "{0}{1}", responseContentSeparator, responseMessage.Content);
                 }
                 else if (string.Equals(eventGridEvent.EventType, ResourceDeletedEvent, StringComparison.OrdinalIgnoreCase))
                 {
-                    return await TriggerStorageAccountDeletedEvent(requestContent, webHookUri, log);
+                    var responseMessage = await TriggerStorageAccountDeletedEvent(requestContent, webHookUri, log);
+                    responseContent.AppendFormat(CultureInfo.InvariantCulture, "{0}{1}", responseContentSeparator, responseMessage.Content);
                 }
             }
+
+            responseContentSeparator = "\r\n,\r\n";
         }
     } 
+
+    if (responseContent.Length > 0)
+    {
+        responseContent.Append("\r\n}");
+        //log.Info($"Full Response:");
+        //log.Info(responseContent.ToString);
+
+        bool returnFullResponse = false;
+        bool succeeded = bool.TryParse(ConfigurationManager.AppSettings["RETURN_FULL_RESPONSE"], out returnFullResponse);
+        if (succeeded && returnFullResponse)
+        {
+            response = responseContent.ToString();
+        }
+    }
 
     return req.CreateResponse(HttpStatusCode.OK, response);     
 }
