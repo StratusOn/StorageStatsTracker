@@ -62,7 +62,7 @@ public class StorageDiagnostics
 public class ResourceEventData 
 { 
     public string correlationId { get; set; }     
-    public string httpRequest { get; set; }   
+    public object httpRequest { get; set; }   
     public string resourceProvider { get; set; }
     public string resourceUri { get; set; }
     public string operationName { get; set; }
@@ -143,6 +143,7 @@ public static async Task<HttpResponseMessage> Run(HttpRequestMessage req, TraceW
             else if (string.Equals(eventGridEvent.EventType, StorageAccountDeletedEventType, StringComparison.OrdinalIgnoreCase))
             {
                 var eventData = dataObject.ToObject<ResourceEventData>();
+                eventData.httpRequest = eventData.httpRequest ?? "";
 
                 log.Info($"Data.correlationId: {eventData.correlationId}");
                 log.Info($"Data.httpRequest: {eventData.httpRequest}");  

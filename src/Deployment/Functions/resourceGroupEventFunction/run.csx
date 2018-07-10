@@ -30,7 +30,7 @@ public class SubscriptionValidationResponseData
 public class ResourceEventData 
 { 
     public string correlationId { get; set; }     
-    public string httpRequest { get; set; }   
+    public object httpRequest { get; set; }   
     public string resourceProvider { get; set; }
     public string resourceUri { get; set; }
     public string operationName { get; set; }
@@ -75,13 +75,14 @@ public static async Task<HttpResponseMessage> Run(HttpRequestMessage req, TraceW
             log.Info($"Subject: {eventGridEvent.Subject}");
             log.Info($"Topic: {eventGridEvent.Topic}");  
             log.Info($"EventTime: {eventGridEvent.EventTime}");  
-            log.Info($"Id: {eventGridEvent.Id}");  
+            log.Info($"Id: {eventGridEvent.Id}");
 
             var eventData = dataObject.ToObject<ResourceEventData>();
 
             // Only process events where resourceProvider=Microsoft.Storage.
             if (string.Equals(eventData.resourceProvider, StorageResourceProvider, StringComparison.OrdinalIgnoreCase))
             {
+                eventData.httpRequest = eventData.httpRequest ?? "";
                 log.Info($"Data.correlationId: {eventData.correlationId}");
                 log.Info($"Data.httpRequest: {eventData.httpRequest}");  
                 log.Info($"Data.resourceProvider: {eventData.resourceProvider}");  
