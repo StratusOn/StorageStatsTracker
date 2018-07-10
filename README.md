@@ -10,7 +10,7 @@ A simple solution that allows tracking new storage account creation as well as c
 ## The Storage Stats
 * The stats can be read from the stats database table by running SQL queries against it.
 
-## Deploying the template:
+## Deploying the template
 To deploy the template, click on the following button:
 
 [![Deploy to Azure](http://azuredeploy.net/deploybutton.png)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FStratusOn%StorageStatsTracker%2Fmaster%2Fsrc%2FDeployment%2Fazuredeploy.json)
