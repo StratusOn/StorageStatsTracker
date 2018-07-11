@@ -19,4 +19,4 @@ To deploy the template, click on the following button:
 **NOTE**: If the SQL database is deployed separately, make sure to run the _dbo.BlobStorageEventData.sql_ and then _dbo.InsertBlobStorageEventDataItem.sql_ scripts found in the [SQLScripts](https://github.com/StratusOn/StorageStatsTracker/tree/master/src/Deployment/SQLScripts) folder. They are also written to the blobStorageEventFunction function next to the run.csx file.
 
 ## Acknowledgements
-Based on his idea and design, this implementation would not be possible without the technical support from Tobias from Microsoft CSE (Commercial Software Engineering).
+Based on his idea, design, and code, this implementation would not be possible without the technical support and guidance from **Tobias Weisserth** from Microsoft CSE (Commercial Software Engineering). This stripped-down version of Tobias' code is shared with his permission.
