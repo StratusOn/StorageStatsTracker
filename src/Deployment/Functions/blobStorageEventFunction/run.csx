@@ -71,7 +71,7 @@ public class ResourceEventData
     public string tenantId { get; set; }
 } 
 
-public static async Task<HttpResponseMessage> Run(HttpRequestMessage req, TraceWriter log) 
+public static async Task<HttpResponseMessage> Run(HttpRequestMessage req, TraceWriter log, ExecutionContext context) 
 { 
     log.Info($"C# HTTP trigger function - Blob created/deleted");
 
@@ -81,6 +81,12 @@ public static async Task<HttpResponseMessage> Run(HttpRequestMessage req, TraceW
     const string BlobCreatedEventType = "Microsoft.Storage.BlobCreated";
     const string BlobDeletedEventType = "Microsoft.Storage.BlobDeleted";
     const string StorageAccountDeletedEventType = "Microsoft.Resources.ResourceDeleteSuccess";
+    const string TableDdlScriptName = "dbo.BlobStorageEventData.sql";
+    const string StoredProcedureDdlScriptName = "dbo.InsertBlobStorageEventDataItem.sql";
+    const string TableCheckingSqlQuery = "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'BlobStorageEventData'";
+    const string StoredProcedureCheckingSqlQuery = "SELECT COUNT(*) FROM INFORMATION_SCHEMA.ROUTINES WHERE ROUTINE_NAME = 'InsertBlobStorageEventDataItem'";
+
+    var connectionString = ConfigurationManager.ConnectionStrings["CONSUMPTION_SQLDB_CONNECTIONSTRING"].ConnectionString;
 
     string requestContent = await req.Content.ReadAsStringAsync(); 
     EventGridEvent[] eventGridEvents = JsonConvert.DeserializeObject<EventGridEvent[]>(requestContent); 
@@ -96,7 +102,13 @@ public static async Task<HttpResponseMessage> Run(HttpRequestMessage req, TraceW
             log.Info($"Got SubscriptionValidation event data, validation code: {eventData.ValidationCode}, topic: {eventGridEvent.Topic}"); 
             // Do any additional validation (as required) and then return back the below response 
             var responseData = new SubscriptionValidationResponseData(); 
-            responseData.ValidationResponse = eventData.ValidationCode; 
+            responseData.ValidationResponse = eventData.ValidationCode;
+
+            // This is a good opportunity to check if the SQL database has the database objects created.
+            string currentFolder = context.FunctionDirectory;
+            await CreateTableIfNotFound(currentFolder, connectionString, TableCheckingSqlQuery, TableDdlScriptName, log);
+            await CreateStoredProcedureIfNotFound(currentFolder, connectionString, StoredProcedureCheckingSqlQuery, StoredProcedureDdlScriptName, log);
+
             return req.CreateResponse(HttpStatusCode.OK, responseData);    
         }
         else
@@ -124,7 +136,7 @@ public static async Task<HttpResponseMessage> Run(HttpRequestMessage req, TraceW
                 log.Info($"Data.sequencer: {eventData.sequencer}");  
                 log.Info($"Data.storageDiagnostics.batchId: {eventData.storageDiagnostics.batchId}"); 
 
-                await WriteBlobCreatedEventToSqlDatabase(eventGridEvent, eventData, log); 
+                await WriteBlobCreatedEventToSqlDatabase(connectionString, eventGridEvent, eventData, log); 
             }
             else if (string.Equals(eventGridEvent.EventType, BlobDeletedEventType, StringComparison.OrdinalIgnoreCase))
             {
@@ -138,7 +150,7 @@ public static async Task<HttpResponseMessage> Run(HttpRequestMessage req, TraceW
                 log.Info($"Data.sequencer: {eventData.sequencer}");  
                 log.Info($"Data.storageDiagnostics.batchId: {eventData.storageDiagnostics.batchId}");  
 
-                await WriteBlobDeletedEventToSqlDatabase(eventGridEvent, eventData, log); 
+                await WriteBlobDeletedEventToSqlDatabase(connectionString, eventGridEvent, eventData, log); 
             }
             else if (string.Equals(eventGridEvent.EventType, StorageAccountDeletedEventType, StringComparison.OrdinalIgnoreCase))
             {
@@ -154,7 +166,7 @@ public static async Task<HttpResponseMessage> Run(HttpRequestMessage req, TraceW
                 log.Info($"Data.subscriptionId: {eventData.subscriptionId}");  
                 log.Info($"Data.tenantId: {eventData.tenantId}");
 
-                await WriteStorageAccountDeletedEventToSqlDatabase(eventGridEvent, log); 
+                await WriteStorageAccountDeletedEventToSqlDatabase(connectionString, eventGridEvent, log); 
             }
         }
     } 
@@ -162,7 +174,7 @@ public static async Task<HttpResponseMessage> Run(HttpRequestMessage req, TraceW
     return req.CreateResponse(HttpStatusCode.OK, response);     
 }
 
-public static async Task WriteBlobCreatedEventToSqlDatabase(EventGridEvent eventGridEvent, BlobStorageCreatedEventData eventData, TraceWriter log)
+public static async Task WriteBlobCreatedEventToSqlDatabase(string connectionString, EventGridEvent eventGridEvent, BlobStorageCreatedEventData eventData, TraceWriter log)
 {
     SqlCommand sqlCommand = new SqlCommand("[dbo].[InsertBlobStorageEventDataItem]");
     sqlCommand.CommandType = CommandType.StoredProcedure;
@@ -185,10 +197,10 @@ public static async Task WriteBlobCreatedEventToSqlDatabase(EventGridEvent event
     sqlCommand.Parameters.Add(new SqlParameter("@data_sequencer", eventData.sequencer));
     sqlCommand.Parameters.Add(new SqlParameter("@data_storageDiagnostics_batchId", eventData.storageDiagnostics.batchId));
 
-    await RunSqlCommand(sqlCommand, log);
+    await RunSqlCommand(connectionString, sqlCommand, log);
 }
 
-public static async Task WriteBlobDeletedEventToSqlDatabase(EventGridEvent eventGridEvent, BlobStorageDeletedEventData eventData, TraceWriter log)
+public static async Task WriteBlobDeletedEventToSqlDatabase(string connectionString, EventGridEvent eventGridEvent, BlobStorageDeletedEventData eventData, TraceWriter log)
 {
     SqlCommand sqlCommand = new SqlCommand("[dbo].[InsertBlobStorageEventDataItem]");
     sqlCommand.CommandType = CommandType.StoredProcedure;
@@ -208,10 +220,10 @@ public static async Task WriteBlobDeletedEventToSqlDatabase(EventGridEvent event
     sqlCommand.Parameters.Add(new SqlParameter("@data_sequencer", eventData.sequencer));
     sqlCommand.Parameters.Add(new SqlParameter("@data_storageDiagnostics_batchId", eventData.storageDiagnostics.batchId));
 
-    await RunSqlCommand(sqlCommand, log);
+    await RunSqlCommand(connectionString, sqlCommand, log);
 }
 
-public static async Task WriteStorageAccountDeletedEventToSqlDatabase(EventGridEvent eventGridEvent, TraceWriter log)
+public static async Task WriteStorageAccountDeletedEventToSqlDatabase(string connectionString, EventGridEvent eventGridEvent, TraceWriter log)
 {
     SqlCommand sqlCommand = new SqlCommand("[dbo].[InsertBlobStorageEventDataItem]");
     sqlCommand.CommandType = CommandType.StoredProcedure;
@@ -233,12 +245,35 @@ public static async Task WriteStorageAccountDeletedEventToSqlDatabase(EventGridE
     var data = JsonConvert.SerializeObject(eventGridEvent.Data); 
     sqlCommand.Parameters.Add(new SqlParameter("@storageAccountDeletedData", data));
 
-    await RunSqlCommand(sqlCommand, log);
+    await RunSqlCommand(connectionString, sqlCommand, log);
 }
 
-public static async Task RunSqlCommand(SqlCommand sqlCommand, TraceWriter log)
+public static async Task CreateTableIfNotFound(string currentFolder, string connectionString, string tableCheckingSqlQuery, string tableDdlScriptName, TraceWriter log)
 {
-    var connectionString = ConfigurationManager.ConnectionStrings["CONSUMPTION_SQLDB_CONNECTIONSTRING"].ConnectionString;
+    int rowCount = await RunQueryWithResult(connectionString, tableCheckingSqlQuery, log);
+    if (rowCount == 0)
+    {
+        string ddlScriptFilePath = Path.Combine(currentFolder, tableDdlScriptName);
+        string ddlScript = File.ReadAllText(ddlScriptFilePath);
+        log.Info($"Executing script '{tableDdlScriptName}'...");
+        await RunSqlCommand(connectionString, new SqlCommand(ddlScript), log);
+    }
+}
+
+public static async Task CreateStoredProcedureIfNotFound(string currentFolder, string connectionString, string storedProcedureCheckingSqlQuery, string storedProcedureDdlScriptName, TraceWriter log)
+{
+    int rowCount = await RunQueryWithResult(connectionString, storedProcedureCheckingSqlQuery, log);
+    if (rowCount == 0)
+    {
+        string ddlScriptFilePath = Path.Combine(currentFolder, storedProcedureDdlScriptName);
+        string ddlScript = File.ReadAllText(ddlScriptFilePath);
+        log.Info($"Executing script '{storedProcedureDdlScriptName}'...");
+        await RunSqlCommand(connectionString, new SqlCommand(ddlScript), log);
+    }
+}
+
+public static async Task RunSqlCommand(string connectionString, SqlCommand sqlCommand, TraceWriter log)
+{
     using (SqlConnection connection = new SqlConnection(connectionString))
     {
         connection.Open();
@@ -246,7 +281,28 @@ public static async Task RunSqlCommand(SqlCommand sqlCommand, TraceWriter log)
         using (SqlCommand command = sqlCommand)
         {
             await command.ExecuteNonQueryAsync();
-            log.Info($"Successfully executed stored proc.");
+            log.Info($"Successfully executed SQL command.");
         }
     }
+}
+
+public static async Task<int> RunQueryWithResult(string connectionString, string sqlQuery, TraceWriter log)
+{
+    int queryResult = 0;
+    using (SqlConnection connection = new SqlConnection(connectionString))
+    {
+        SqlCommand sqlCommand = new SqlCommand(sqlQuery, connection);
+        connection.Open();
+        try
+        {
+            queryResult = (int)(await sqlCommand.ExecuteScalarAsync());
+            log.Info($"Successfully executed query. Results: {queryResult}.");
+        }
+        catch (SqlException ex)
+        {
+            log.Info($"Query execution failed: {ex.Message}");
+        }
+    }
+
+    return queryResult;
 }

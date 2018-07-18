@@ -1,9 +1,3 @@
-SET ANSI_NULLS ON
-GO
-
-SET QUOTED_IDENTIFIER ON
-GO
-
 CREATE TABLE [dbo].[BlobStorageEventData] (
     [BlobEventId]                     BIGINT           IDENTITY (1, 1) NOT NULL,
     [topic]                           NVARCHAR (100)   NOT NULL,
